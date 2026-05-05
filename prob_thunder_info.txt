@@ -1,0 +1,50 @@
+Overview of ProbThunder verifcation process
+
+1.  Collect METAR data
+    -- Script: collect_metars.py
+    
+2.  Loop thru collected data to build master station list from downloaded data.
+    -- Script: build_station_list.py
+
+3.  Aggregate observations into 3, 6, and 12 hour intervals
+    -- Script: aggregate_observations.py
+
+4.  Download NBM ProThunder (tstm03,tstm06,etc..) data from AWS.
+    -- Script: download_nbm.py
+
+5.  Within ArcGIS Pro, I took the 'stations.csv' file and ran the Buffer tool on it to create 20km buffer around each station location.  I then used the feature layer
+    in the geodatabase (could also use a shapefile) to calculated zonal stats for each station for each NBM forecast hour.
+
+6.  Use 20km buffer feature layer (or shapefile) to calculate zonal stats for each station "buffer" polygon.
+    -- Script: calculate_nbm_stats_multi.py (uses multiprocessing)
+
+7.  Merge calculatd NBM stats and METAR observations
+    -- Script: merge_data.py
+
+8.  Summarize the combined NBM / METAR data into parquet files for generating plots
+    -- Script: summarize_stats.py
+
+9.  Notebook to generate point verification plots
+    -- Script: prob_thunder_plots.ipynb
+
+
+Overview of ProbThunder / NLDN gridded verifcation process
+
+1.  Download NLDN point-base CG lightning data.  The CG strike data will be converted to NBM grid
+    -- Script: download_nldn.py
+
+2.  Aggregate NLDN point data to 6 & 12 hour csv files
+    -- Script: aggregate_nldn.py
+
+3.  Convert CG point datat to NBM grid.  Utilize existing NBM grid in geodatabase for grid resolution and dimensions
+    -- Script: nldn_point_to_raster.py
+
+4.  Dilate the point-based rasters to 20km around each pixel
+    -- Script: dialate_nldn_rasters.py
+
+5.  Calculate metrics and output to csv file for plotting.
+    -- Script: verif_prob_thunder_gridded.py
+
+6.  Plot results
+    -- Script: prob_thunder_gridded_reliability_plot.ipynb
+
