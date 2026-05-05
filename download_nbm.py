@@ -1,4 +1,4 @@
-"""Download NBM CONUS thunder probability TIFFs from NOAA public S3 storage.
+"""Download NBM thunder probability TIFFs from NOAA public S3 storage.
 
 Overview:
 - Iterates daily initialization cycles over a user-defined date range.
@@ -58,7 +58,7 @@ def download_s3_file(s3_client, bucket, key, local_path):
     except Exception as e:
         return f"Error downloading {key}: {e}"
 
-def fetch_nbm_f174_renamed(start_date_str, end_date_str, save_dir, target_elements, init_hours):
+def fetch_nbm_f174_renamed(start_date_str, end_date_str, save_dir, target_elements, init_hours, region="alaska"):
     """Fetch and rename NBM thunder-probability TIFFs through forecast hour 174.
 
     For each date, initialization time, and target element, this function lists
@@ -67,7 +67,7 @@ def fetch_nbm_f174_renamed(start_date_str, end_date_str, save_dir, target_elemen
     time is <= 174 hours.
 
     Downloaded files are renamed to:
-        blendv{version}_conus_{element}_{init}_F{forecast_hour:03d}.tif
+        blendv{version}_{region}_{element}_{init}_F{forecast_hour:03d}.tif
 
     Args:
         start_date_str: Inclusive start date in YYYY-MM-DD format.
@@ -98,7 +98,7 @@ def fetch_nbm_f174_renamed(start_date_str, end_date_str, save_dir, target_elemen
                 init_dt = datetime.datetime.strptime(f"{current_date.strftime('%Y%m%d')}{init_hhmm}", "%Y%m%d%H%M")
                 
                 for element in target_elements:
-                    prefix = f"blendv{version}/conus/{date_str}/{init_hhmm}/{element}/"
+                    prefix = f"blendv{version}/{region}/{date_str}/{init_hhmm}/{element}/"
                     
                     try:
                         paginator = s3.get_paginator('list_objects_v2')
@@ -130,7 +130,7 @@ def fetch_nbm_f174_renamed(start_date_str, end_date_str, save_dir, target_elemen
                                         
                                         # Standardized local filename with explicit lead time tag.
                                         clean_init_str = init_dt.strftime("%Y-%m-%dT%H%M")
-                                        new_filename = f"blendv{version}_conus_{element}_{clean_init_str}_F{forecast_hour:03d}.tif"
+                                        new_filename = f"blendv{version}_{region}_{element}_{clean_init_str}_F{forecast_hour:03d}.tif"
                                         
                                         local_file_path = os.path.join(
                                             save_dir, 
@@ -176,6 +176,6 @@ if __name__ == "__main__":
     TARGET_ELEMENTS = ['tstm01', 'tstm03', 'tstm06', 'tstm12'] # You can add 'tstm01', 'tstm03', etc.
     INIT_HOURS = ['0100', '1300']
     
-    SAVE_DIRECTORY = r"C:\Users\chad.kahler\Documents\ArcGIS\Projects\NBM_Verif\Data\prob_thunder"
+    SAVE_DIRECTORY = r"C:\Users\David.Levin\NBMLightningVer\nbm_data"
     
     fetch_nbm_f174_renamed(START_DATE, END_DATE, SAVE_DIRECTORY, TARGET_ELEMENTS, INIT_HOURS)
