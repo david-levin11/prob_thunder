@@ -39,7 +39,7 @@ def process_lightning_batch(base_in, base_out, radius_km=20, max_files=None):
         LCC grids) when converting kilometers to pixel distance.
     """
     # Define the subdirectories we want to process
-    subdirs = ['nldn_06', 'nldn_12']
+    subdirs = ['gld_06', 'gld_12']
     # subdirs = ['nldn_06']
     processed_files = 0
     
@@ -97,8 +97,8 @@ def process_lightning_batch(base_in, base_out, radius_km=20, max_files=None):
                 print(f"  Error processing {file.name}: {e}")
 
 # --- Configuration ---
-input_base_dir = r"C:\Users\chad.kahler\Documents\ArcGIS\Projects\NBM_Verif\Data\nldn\nldn_rasters"
-output_base_dir = r"C:\Users\chad.kahler\Documents\ArcGIS\Projects\NBM_Verif\Data\nldn\nldn_rasters" 
+input_base_dir = r"C:\Users\David.Levin\NBMLightningVer\gld_rasters"
+output_base_dir = r"C:\Users\David.Levin\NBMLightningVer\gld_rasters" 
 MAX_FILES = None  # Set to None to process all files
 
 process_lightning_batch(input_base_dir, output_base_dir, max_files=MAX_FILES)

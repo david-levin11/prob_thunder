@@ -20,19 +20,19 @@ import glob
 
 # --- Configuration ---
 # Path to project database
-arcpy.env.workspace = r"C:\Users\chad.kahler\Documents\ArcGIS\Projects\NBM_Verif\NBM_Verif.gdb"
+arcpy.env.workspace = r"C:\Users\David.Levin\Documents\ArcGIS\Projects\NBMProbThunder\NBMProbThunder.gdb"
 
 # Path to an existing NBM file (GRIB or TIFF) to act as the grid template
-NBM_TEMPLATE = arcpy.Raster("NBM_JFWPRB")
+NBM_TEMPLATE = arcpy.Raster("NBM_Template.tif")
 
 # Directories we created in the previous step
 CSV_FOLDERS = [
-    r"C:\Users\chad.kahler\Documents\ArcGIS\Projects\NBM_Verif\Data\nldn\nldn_06_obs",
-    r"C:\Users\chad.kahler\Documents\ArcGIS\Projects\NBM_Verif\Data\nldn\nldn_12_obs"
+    r"C:\Users\David.Levin\NBMLightningVer\gld_06_obs",
+    r"C:\Users\David.Levin\NBMLightningVer\gld_12_obs"
 ]
 
 # Where to save the final rasters
-RASTER_OUTPUT_BASE = r"C:\Users\chad.kahler\Documents\ArcGIS\Projects\NBM_Verif\Data\nldn\nldn_rasters"
+RASTER_OUTPUT_BASE = r"C:\Users\David.Levin\NBMLightningVer\gld_rasters"
 
 # Set to an integer (e.g., 1) to process only that many files total, then exit.
 # Keep as None for normal full processing.

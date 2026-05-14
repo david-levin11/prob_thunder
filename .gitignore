@@ -1,2 +1,10 @@
 GLD*
 settings.json
+/gld_06_obs
+/gld_12_obs
+/nbm_data
+/monthly_stats
+debug.log
+2025_AK.txt
+NBM_Template.tif
+test_file.py
