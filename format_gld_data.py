@@ -29,7 +29,7 @@ OUTPUT_DIR_12 = os.path.join(INPUT_DIR, "gld_12_obs")
 for d in [OUTPUT_DIR_06, OUTPUT_DIR_12]:
     os.makedirs(d, exist_ok=True)
 
-YEARS = [2023, 2024, 2025]
+YEARS = [2020, 2021, 2022]
 MONTHS = range(3, 11)  # March through October
 VALID_HOURS = [0, 6, 12, 18]
 WINDOWS = [6, 12]

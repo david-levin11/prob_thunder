@@ -10,3 +10,5 @@ NBM_Template.tif
 test_file.py
 cb*
 /plots
+/brier_gld_climo
+/aicc_climo
