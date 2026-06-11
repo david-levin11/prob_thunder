@@ -48,7 +48,7 @@ from rasterio.features import geometry_mask
 
 # --- CONFIG ---
 BASE_TRUTH_ROOT = Path(
-    r"C:\Users\David.Levin\NBMLightningVer\aicc_lightning\rasters_total_dilated"
+    r"C:\Users\David.Levin\NBMLightningVer\union_lightning_rasters"
 )
 
 BASE_FCST = Path(
@@ -56,7 +56,7 @@ BASE_FCST = Path(
 )
 
 OUT_DIR = Path(
-    r"C:\Users\David.Levin\NBMLightningVer\aicc_monthly_stats"
+    r"C:\Users\David.Levin\NBMLightningVer\union_monthly_stats"
 )
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -551,7 +551,7 @@ def process_month(interval, year, month):
     interval_str = f"{interval:02d}"
     month_str = f"{month:02d}"
 
-    truth_dir = BASE_TRUTH_ROOT / f"aicc_total_{interval_str}_20km_dilated"
+    truth_dir = BASE_TRUTH_ROOT / f"union_{interval_str}_20km"
     fct_pattern = f"*tstm{interval_str}*.tif"
 
     csv_name = OUT_DIR / f"verif_{interval_str}_{year}_{month_str}.csv"
@@ -592,7 +592,7 @@ def process_month(interval, year, month):
         if valid_dt is None or forecast_hour is None or period is None:
             continue
 
-        t_path = truth_dir / f"aicc_total_{interval_str}h_{valid_dt.strftime('%Y%m%d_%H00Z')}.tif"
+        t_path = truth_dir / f"union_{interval_str}h_{valid_dt.strftime('%Y%m%d_%H00Z')}.tif"
 
         if not t_path.exists():
             continue

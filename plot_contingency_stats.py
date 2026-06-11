@@ -25,11 +25,11 @@ import matplotlib.pyplot as plt
 # ---------------------------------------------------------------------
 
 MONTHLY_STATS_DIR = Path(
-    r"C:\Users\David.Levin\NBMLightningVer\monthly_stats"
+    r"C:\Users\David.Levin\NBMLightningVer\union_monthly_stats"
 )
 
 PLOT_DIR = Path(
-    r"C:\Users\David.Levin\NBMLightningVer\plots\contingency_low_thresholds"
+    r"C:\Users\David.Levin\NBMLightningVer\plots\contingency_low_thresholds_union"
 )
 PLOT_DIR.mkdir(parents=True, exist_ok=True)
 

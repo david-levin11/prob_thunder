@@ -16,3 +16,5 @@ cb*
 /aicc_monthly_stats
 /union_*
 /aicc_total_climatology
+/union_monthly_stats
+/brier_aicc_total_climo
