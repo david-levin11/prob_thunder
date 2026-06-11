@@ -48,7 +48,7 @@ from rasterio.features import geometry_mask
 
 # --- CONFIG ---
 BASE_TRUTH_ROOT = Path(
-    r"C:\Users\David.Levin\NBMLightningVer\union_lightning_rasters"
+    r"C:\Users\David.Levin\NBMLightningVer\aicc_lightning_rasters"
 )
 
 BASE_FCST = Path(
@@ -56,7 +56,7 @@ BASE_FCST = Path(
 )
 
 OUT_DIR = Path(
-    r"C:\Users\David.Levin\NBMLightningVer\union_monthly_stats"
+    r"C:\Users\David.Levin\NBMLightningVer\aicc_monthly_stats"
 )
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
