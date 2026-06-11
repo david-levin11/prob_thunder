@@ -12,3 +12,9 @@ cb*
 /plots
 /brier_gld_climo
 /aicc_climo
+/aicc_lightning
+/aicc_monthly_stats
+/union_*
+/aicc_total_climatology
+/union_monthly_stats
+/brier_aicc_total_climo

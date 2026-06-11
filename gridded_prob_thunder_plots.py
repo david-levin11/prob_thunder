@@ -39,7 +39,7 @@ MONTHLY_STATS_DIR = Path(
 )
 
 PLOT_DIR = Path(
-    r"C:\Users\David.Levin\NBMLightningVer\plots"
+    r"C:\Users\David.Levin\NBMLightningVer\plots\gld"
 )
 PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -472,6 +472,31 @@ def plot_reliability_by_forecast_hour(
             color=color,
             label=f"F{int(fh)}",
         )
+
+        if not group["observed_frequency"].isna().all():
+            max_idx = group["prob_bin_midpoint"].idxmax()
+            #print(f"max_idx is :{max_idx}")
+            max_row = group.loc[max_idx]
+            #print(f"max_row is: {max_row}")
+            #print(f"labelx is {max_row['prob_bin_midpoint']}")
+            #print(f"labely is {max_row['observed_frequency']}")
+            ax.plot(
+                max_row["prob_bin_midpoint"]*100,
+                max_row["observed_frequency"]*100,
+                marker="o",
+                markersize=7,
+                color=color,
+            )
+
+            ax.text(
+                max_row["prob_bin_midpoint"]*100 + 1,
+                max_row["observed_frequency"]*100,
+                f"F{int(fh)}",
+                color=color,
+                fontsize=8,
+                fontweight="bold",
+                va="bottom",
+            )
 
     ax.plot([0, 100], [0, 100], color="black", linestyle="--", linewidth=1)
 
