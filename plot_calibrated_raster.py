@@ -32,7 +32,8 @@ import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
-from matplotlib.colors import BoundaryNorm
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.patches import Patch
 
 
 # ---------------------------------------------------------------------
@@ -56,8 +57,14 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Pick one NBM thunder raster to test.
 FORECAST_FILE = Path(
-    r"C:\Users\David.Levin\NBMLightningVer\nbm_data\2025\06\18\1300\tstm12\blendv4.3_alaska_tstm12_2025-06-18T1300_F017.tif"
+    r"C:\Users\David.Levin\NBMLightningVer\blendv5.0_alaska_tstm12_2026-06-17T12_00_2026-06-19T06_00.tif"
 )
+
+
+# # Pick one NBM thunder raster to test.
+# FORECAST_FILE = Path(
+#     r"C:\Users\David.Levin\NBMLightningVer\nbm_data\2025\06\18\1300\tstm12\blendv4.3_alaska_tstm12_2025-06-18T1300_F017.tif"
+# )
 
 FORECAST_IS_PERCENT = True
 
@@ -70,12 +77,68 @@ SAVE_PNG = True
 # If True, show the plot interactively.
 SHOW_PLOT = True
 
-# Mask probabilities below this value in the plot only.
-# Use 0.01 to hide <1%, or 0.0 to show everything.
-PLOT_MIN_PROB = 0.011
+# ---------------------------------------------------------------------
+# PLOTTING OPTIONS
+# ---------------------------------------------------------------------
 
-# Shared probability color scale.
-PROB_LEVELS = np.arange(0.0, 1.01, 0.10)
+# If True, plot categorical probability classes.
+# If False, plot continuous probabilities using PROB_LEVELS.
+USE_CATEGORICAL_PLOTTING = False
+
+# Continuous plot masking threshold only.
+# Values <= this threshold are transparent in continuous plots.
+PLOT_MIN_PROB = 0.009
+
+PROB_LEVELS = np.array([
+    0.00,
+    0.01,   # 1%
+    0.025,  # 2.5%
+    0.05,   # 5%
+    0.075,  # 7.5%
+    0.10,   # 10%
+    0.20,   # 20%
+    0.30,   # 30%
+    0.50,   # 50%
+    0.70,   # 70%
+    1.00,   # 100%
+])
+
+PROB_LEVEL_LABELS = [
+    "0%",
+    "1%",
+    "2.5%",
+    "5%",
+    "7.5%",
+    "10%",
+    "20%",
+    "30%",
+    "50%",
+    "70%",
+    "100%",
+]
+
+PROB_COLORS = [
+    "#f7fbff",  # 0–1%
+    "#dbeef7",  # 1–2.5%
+    "#b6d7e8",  # 2.5–5%
+    "#fff2b2",  # 5–7.5%
+    "#fed976",  # 7.5–10%
+    "#feb24c",  # 10–20%
+    "#fd8d3c",  # 20–30%
+    "#f03b20",  # 30–50%
+    "#bd0026",  # 50–70%
+    "#800026",  # 70–100%
+]
+
+# Categorical probability classes. Values are 0-1 probabilities.
+# lower bound is inclusive; upper bound is exclusive, except the final
+# high-end category effectively includes everything up to 1.0.
+CATEGORY_DEFS = [
+    {"label": "Isolated",   "min": 0.05, "max": 0.30, "color": "yellow"},
+    {"label": "Scattered",  "min": 0.30, "max": 0.51, "color": "orange"},
+    {"label": "Numerous",   "min": 0.51, "max": 0.701, "color": "red"},
+    {"label": "Widespread", "min": 0.701, "max": 1.01, "color": "purple"},
+]
 
 
 VALID_HOUR_TO_PERIOD = {
@@ -85,9 +148,24 @@ VALID_HOUR_TO_PERIOD = {
     18: "night",
 }
 
-CALIBRATE_MIN_RAW_PROB = 0.10
-UPWARD_ONLY_CALIBRATION = True
+# ---------------------------------------------------------------------
+# CALIBRATION OPTIONS
+# ---------------------------------------------------------------------
+
+# With the updated calibration model trained on mean_fcst_prob, it is reasonable
+# to apply the model over the full non-missing field. Exact raw zeros can still
+# be forced back to zero so a true 0% NBM area does not become nonzero.
+CALIBRATE_MIN_RAW_PROB = 0.00
+
+# For a true reliability calibration comparison, leave this False.
+# Set True only if you intentionally want an upward-only operational stretch.
+UPWARD_ONLY_CALIBRATION = False
+
 ZERO_STAYS_ZERO = True
+
+# Print counts of raw/calibrated grid cells exceeding key probabilities.
+PRINT_FOOTPRINT_DIAGNOSTICS = True
+FOOTPRINT_THRESHOLDS = [0.01, 0.05, 0.10, 0.30, 0.51, 0.70]
 
 # ---------------------------------------------------------------------
 # HELPERS
@@ -110,30 +188,82 @@ def get_nbm_alaska_crs():
 
 
 def parse_forecast_file_info(path: Path):
-    """Parse valid time, forecast hour, interval, and period from NBM filename/path."""
+    """Parse init time, valid time, forecast hour, interval, and period from NBM filename/path.
 
-    # Example filename fragment:
-    # blendv4.3_alaska_tstm12_2025-06-18T1300_F017.tif
-    time_match = re.search(
-        r"(\d{4}-\d{2}-\d{2}T\d{4})_F(\d{3})",
-        path.name,
-    )
+    Supports both filename styles:
 
-    if not time_match:
-        raise ValueError(f"Could not parse init time / forecast hour from: {path.name}")
+    1) Old archive style:
+       blendv4.3_alaska_tstm12_2025-06-18T1300_F017.tif
 
-    init_str, fh_str = time_match.groups()
-    init_dt = datetime.strptime(init_str, "%Y-%m-%dT%H%M")
-    forecast_hour = int(fh_str)
-    valid_dt = init_dt + timedelta(hours=forecast_hour)
+    2) New exported style:
+       blendv5.0_alaska_tstm12_2026-06-14T12_00_2026-06-15T06_00.tif
+    """
 
-    # Parse interval from tstm06 or tstm12 in filename or parent folder.
+    name = path.name
+
+    # ------------------------------------------------------------
+    # Parse interval from tstm06 or tstm12 in filename or parent path
+    # ------------------------------------------------------------
     interval_match = re.search(r"tstm(\d{2})", str(path))
 
     if not interval_match:
         raise ValueError(f"Could not parse tstm interval from path: {path}")
 
     interval_hour = int(interval_match.group(1))
+
+    # ------------------------------------------------------------
+    # Pattern 1: old style with init and forecast hour
+    # Example: 2025-06-18T1300_F017
+    # ------------------------------------------------------------
+    old_match = re.search(
+        r"(\d{4}-\d{2}-\d{2}T\d{4})_F(\d{3})",
+        name,
+    )
+
+    if old_match:
+        init_str, fh_str = old_match.groups()
+        init_dt = datetime.strptime(init_str, "%Y-%m-%dT%H%M")
+        forecast_hour = int(fh_str)
+        valid_dt = init_dt + timedelta(hours=forecast_hour)
+
+    else:
+        # ------------------------------------------------------------
+        # Pattern 2: new style with init time and valid time
+        # Example: 2026-06-14T12_00_2026-06-15T06_00
+        # ------------------------------------------------------------
+        new_match = re.search(
+            r"(\d{4}-\d{2}-\d{2}T\d{2})_(\d{2})_"
+            r"(\d{4}-\d{2}-\d{2}T\d{2})_(\d{2})",
+            name,
+        )
+
+        if not new_match:
+            raise ValueError(
+                f"Could not parse NBM timing from: {name}\n\n"
+                "Expected one of these filename patterns:\n"
+                "  Old style: 2025-06-18T1300_F017\n"
+                "  New style: 2026-06-14T12_00_2026-06-15T06_00"
+            )
+
+        init_datehour, init_minute, valid_datehour, valid_minute = new_match.groups()
+
+        init_dt = datetime.strptime(
+            f"{init_datehour}_{init_minute}",
+            "%Y-%m-%dT%H_%M",
+        )
+
+        valid_dt = datetime.strptime(
+            f"{valid_datehour}_{valid_minute}",
+            "%Y-%m-%dT%H_%M",
+        )
+
+        forecast_hour = int(round((valid_dt - init_dt).total_seconds() / 3600.0))
+
+        if forecast_hour < 0:
+            raise ValueError(
+                f"Parsed negative forecast hour from {name}: "
+                f"init={init_dt}, valid={valid_dt}"
+            )
 
     period = VALID_HOUR_TO_PERIOD.get(valid_dt.hour)
 
@@ -223,6 +353,91 @@ def write_calibrated_raster(template_ds, calibrated_prob, out_path):
     print(f"Wrote calibrated raster: {out_path}")
 
 
+def probability_category_label(cat):
+    """Create a human-readable legend label for one category definition."""
+
+    cmin = cat["min"] * 100.0
+    cmax = cat["max"] * 100.0
+
+    if cat["max"] >= 1.0:
+        return f"{cat['label']} (>={cmin:.0f}%)"
+
+    # Display upper edge as the highest whole-percent category value.
+    # Example: max=0.30 means 5-29%.
+    upper_display = cmax - 1.0
+
+    if upper_display <= cmin:
+        return f"{cat['label']} ({cmin:.0f}-{cmax:.0f}%)"
+
+    return f"{cat['label']} ({cmin:.0f}-{upper_display:.0f}%)"
+
+
+def make_categorical_array(prob_arr, category_defs):
+    """Convert continuous probabilities into categorical plotting codes.
+
+    Returns
+    -------
+    cat_arr : np.ndarray
+        Float array with NaN where transparent, otherwise category codes 1..N.
+    cmap : ListedColormap
+        Categorical colormap matching category_defs.
+    legend_handles : list[Patch]
+        Legend handles for category labels.
+    """
+
+    cat_arr = np.full(prob_arr.shape, np.nan, dtype="float32")
+    colors = []
+    legend_handles = []
+
+    for i, cat in enumerate(category_defs, start=1):
+        cmin = float(cat["min"])
+        cmax = float(cat["max"])
+        color = cat["color"]
+
+        mask = np.isfinite(prob_arr) & (prob_arr >= cmin) & (prob_arr < cmax)
+        cat_arr[mask] = float(i)
+
+        colors.append(color)
+        legend_handles.append(
+            Patch(
+                facecolor=color,
+                edgecolor="black",
+                label=probability_category_label(cat),
+            )
+        )
+
+    cmap = ListedColormap(colors)
+    cmap.set_bad(alpha=0.0)
+
+    return cat_arr, cmap, legend_handles
+
+
+def print_footprint_diagnostics(raw_prob, calibrated_prob):
+    """Print raw vs calibrated probability footprint counts."""
+
+    valid = np.isfinite(raw_prob) & np.isfinite(calibrated_prob)
+
+    print("\nFootprint diagnostics:")
+    print(f"  Valid pixels: {int(valid.sum()):,}")
+
+    for t in FOOTPRINT_THRESHOLDS:
+        raw_count = int(np.count_nonzero(valid & (raw_prob >= t)))
+        cal_count = int(np.count_nonzero(valid & (calibrated_prob >= t)))
+        diff = cal_count - raw_count
+
+        if raw_count > 0:
+            pct_change = 100.0 * diff / raw_count
+            pct_text = f"{pct_change:+.1f}%"
+        else:
+            pct_text = "n/a"
+
+        print(
+            f"  >= {t * 100:5.1f}%: "
+            f"raw={raw_count:,}, calibrated={cal_count:,}, "
+            f"diff={diff:+,} ({pct_text})"
+        )
+
+
 def plot_raw_vs_calibrated(
     ds,
     raw_prob,
@@ -238,19 +453,35 @@ def plot_raw_vs_calibrated(
     left, bottom, right, top = ds.rio.bounds()
     extent = [left, right, bottom, top]
 
-    raw_plot = np.ma.masked_where(
-        (~np.isfinite(raw_prob)) | (raw_prob < PLOT_MIN_PROB),
-        raw_prob,
-    )
+    if USE_CATEGORICAL_PLOTTING:
+        raw_cat, raw_cmap, raw_legend_handles = make_categorical_array(
+            raw_prob, CATEGORY_DEFS
+        )
+        cal_cat, cal_cmap, cal_legend_handles = make_categorical_array(
+            calibrated_prob, CATEGORY_DEFS
+        )
 
-    cal_plot = np.ma.masked_where(
-        (~np.isfinite(calibrated_prob)) | (calibrated_prob < PLOT_MIN_PROB),
-        calibrated_prob,
-    )
+        raw_plot = np.ma.masked_invalid(raw_cat)
+        cal_plot = np.ma.masked_invalid(cal_cat)
+    else:
+        raw_plot = np.ma.masked_where(
+            (~np.isfinite(raw_prob)) | (raw_prob <= PLOT_MIN_PROB),
+            raw_prob,
+        )
 
-    cmap = plt.get_cmap("YlOrRd", len(PROB_LEVELS) - 1).copy()
-    cmap.set_bad(alpha=0.0)
-    norm = BoundaryNorm(PROB_LEVELS, cmap.N)
+        cal_plot = np.ma.masked_where(
+            (~np.isfinite(calibrated_prob)) | (calibrated_prob <= PLOT_MIN_PROB),
+            calibrated_prob,
+        )
+
+        cmap = ListedColormap(PROB_COLORS)
+        cmap.set_bad(alpha=0.0)
+
+        norm = BoundaryNorm(
+            PROB_LEVELS,
+            ncolors=cmap.N,
+            clip=True,
+        )
 
     fig, axes = plt.subplots(
         1,
@@ -281,19 +512,37 @@ def plot_raw_vs_calibrated(
     ax = axes[0]
     add_background(ax)
 
-    im0 = ax.imshow(
-        raw_plot,
-        origin="upper",
-        extent=extent,
-        transform=raster_crs,
-        cmap=cmap,
-        norm=norm,
-        alpha=0.90,
-        zorder=2,
-    )
+    if USE_CATEGORICAL_PLOTTING:
+        im0 = ax.imshow(
+            raw_plot,
+            origin="upper",
+            extent=extent,
+            transform=raster_crs,
+            cmap=raw_cmap,
+            vmin=1,
+            vmax=len(CATEGORY_DEFS),
+            alpha=0.90,
+            zorder=2,
+        )
+    else:
+        im0 = ax.imshow(
+            raw_plot,
+            origin="upper",
+            extent=extent,
+            transform=raster_crs,
+            cmap=cmap,
+            norm=norm,
+            alpha=0.90,
+            zorder=2,
+        )
 
+    raw_title_label = (
+        "Raw NBM Thunder Probability Categories"
+        if USE_CATEGORICAL_PLOTTING
+        else "Raw NBM Thunder Probability"
+    )
     ax.set_title(
-        f"Raw NBM Thunder Probability\n"
+        f"{raw_title_label}\n"
         f"Max: {np.nanmax(raw_prob):.2f}, Mean: {np.nanmean(raw_prob):.4f}"
     )
 
@@ -301,31 +550,63 @@ def plot_raw_vs_calibrated(
     ax = axes[1]
     add_background(ax)
 
-    im1 = ax.imshow(
-        cal_plot,
-        origin="upper",
-        extent=extent,
-        transform=raster_crs,
-        cmap=cmap,
-        norm=norm,
-        alpha=0.90,
-        zorder=2,
-    )
+    if USE_CATEGORICAL_PLOTTING:
+        im1 = ax.imshow(
+            cal_plot,
+            origin="upper",
+            extent=extent,
+            transform=raster_crs,
+            cmap=cal_cmap,
+            vmin=1,
+            vmax=len(CATEGORY_DEFS),
+            alpha=0.90,
+            zorder=2,
+        )
+    else:
+        im1 = ax.imshow(
+            cal_plot,
+            origin="upper",
+            extent=extent,
+            transform=raster_crs,
+            cmap=cmap,
+            norm=norm,
+            alpha=0.90,
+            zorder=2,
+        )
 
+    cal_title_label = (
+        "Calibrated NBM Thunder Probability Categories"
+        if USE_CATEGORICAL_PLOTTING
+        else "Calibrated NBM Thunder Probability"
+    )
     ax.set_title(
-        f"Calibrated NBM Thunder Probability\n"
+        f"{cal_title_label}\n"
         f"Max: {np.nanmax(calibrated_prob):.2f}, Mean: {np.nanmean(calibrated_prob):.4f}"
     )
 
-    cbar = fig.colorbar(
-        im1,
-        ax=axes,
-        orientation="horizontal",
-        fraction=0.046,
-        pad=0.05,
-    )
-    cbar.set_label("Probability")
-    cbar.set_ticks(PROB_LEVELS)
+    if USE_CATEGORICAL_PLOTTING:
+        for ax in axes:
+            ax.legend(
+                handles=cal_legend_handles,
+                loc="lower left",
+                frameon=True,
+                framealpha=0.92,
+                title="Probability category",
+            )
+    else:
+        cbar = fig.colorbar(
+            im1,
+            ax=axes,
+            orientation="horizontal",
+            fraction=0.046,
+            pad=0.05,
+            boundaries=PROB_LEVELS,
+            ticks=PROB_LEVELS,
+            spacing="uniform",
+        )
+
+        cbar.set_label("Thunder probability")
+        cbar.ax.set_xticklabels(PROB_LEVEL_LABELS)
 
     fig.suptitle(
         f"Raw vs {DATASET_NAME} Isotonic-Calibrated NBM Thunder Probability\n"
@@ -384,6 +665,9 @@ def main():
         raw_prob = np.where(np.isfinite(raw_prob), np.clip(raw_prob, 0.0, 1.0), np.nan)
 
         calibrated_prob = apply_calibration(raw_prob, model)
+
+        if PRINT_FOOTPRINT_DIAGNOSTICS:
+            print_footprint_diagnostics(raw_prob, calibrated_prob)
 
         print("\nRaw probability summary:")
         print(f"  min:  {np.nanmin(raw_prob):.4f}")
