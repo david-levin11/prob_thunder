@@ -57,10 +57,21 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Pick one NBM thunder raster to test.
 FORECAST_FILE = Path(
-    r"C:\Users\David.Levin\NBMLightningVer\blendv5.0_alaska_tstm12_2026-06-23T00_00_2026-06-24T06_00.tif"
+    r"C:\Users\David.Levin\NBMLightningVer\blendv5.0_alaska_tstm12_2026-06-17T12_00_2026-06-19T06_00.tif"
 )
 
+# Already-calibrated raster created by the CSV workflow.
+# This should be the output from your simple CSV calibration script.
+CSV_CALIBRATED_FILE = Path(
+    r"C:\Users\David.Levin\NBMLightningVer\blendv5.0_alaska_tstm12_2026-06-17T12_00_2026-06-19T06_00_calibrated.tif"
+)
 
+# True if the CSV-calibrated raster was written as 0-100 percent.
+# False if it was written as 0-1 probability.
+CSV_CALIBRATED_IS_PERCENT = True
+
+# Print difference diagnostics between joblib-calibrated and CSV-calibrated grids.
+PRINT_CSV_COMPARISON_DIAGNOSTICS = True
 # # Pick one NBM thunder raster to test.
 # FORECAST_FILE = Path(
 #     r"C:\Users\David.Levin\NBMLightningVer\nbm_data\2025\06\18\1300\tstm12\blendv4.3_alaska_tstm12_2025-06-18T1300_F017.tif"
@@ -353,6 +364,78 @@ def write_calibrated_raster(template_ds, calibrated_prob, out_path):
     print(f"Wrote calibrated raster: {out_path}")
 
 
+def read_external_calibrated_raster(path, expected_shape):
+    """Read an externally calibrated raster and return probabilities in 0-1 units."""
+
+    if not path.exists():
+        raise FileNotFoundError(f"CSV-calibrated raster not found:\n{path}")
+
+    with rxr.open_rasterio(path, mask_and_scale=True) as ds_ext:
+        arr = ds_ext.values[0].astype(float)
+
+    if arr.shape != expected_shape:
+        raise ValueError(
+            f"CSV-calibrated raster shape does not match raw forecast grid.\n"
+            f"  CSV raster shape: {arr.shape}\n"
+            f"  Expected shape:    {expected_shape}"
+        )
+
+    if CSV_CALIBRATED_IS_PERCENT:
+        prob = arr / 100.0
+    else:
+        prob = arr
+
+    prob = np.where(
+        np.isfinite(prob),
+        np.clip(prob, 0.0, 1.0),
+        np.nan,
+    )
+
+    return prob.astype("float32")
+
+
+def print_csv_comparison_diagnostics(raw_prob, joblib_prob, csv_prob):
+    """Print diagnostics comparing joblib-calibrated and CSV-calibrated rasters."""
+
+    valid = (
+        np.isfinite(raw_prob) &
+        np.isfinite(joblib_prob) &
+        np.isfinite(csv_prob)
+    )
+
+    if not np.any(valid):
+        print("\nNo overlapping valid pixels for CSV/joblib comparison.")
+        return
+
+    diff = csv_prob[valid] - joblib_prob[valid]
+    abs_diff = np.abs(diff)
+
+    print("\nCSV vs joblib calibrated raster comparison:")
+    print(f"  Valid comparison pixels: {int(valid.sum()):,}")
+    print(f"  Mean diff, CSV - joblib: {np.nanmean(diff):+.8f}")
+    print(f"  Median abs diff:         {np.nanmedian(abs_diff):.8f}")
+    print(f"  Mean abs diff:           {np.nanmean(abs_diff):.8f}")
+    print(f"  Max abs diff:            {np.nanmax(abs_diff):.8f}")
+
+    thresholds = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]
+
+    print("\nPixels with absolute difference greater than threshold:")
+    for t in thresholds:
+        n = int(np.count_nonzero(abs_diff > t))
+        pct = 100.0 * n / valid.sum()
+        print(f"  > {t:g}: {n:,} pixels ({pct:.4f}%)")
+
+    print("\nProbability footprint comparison:")
+    for t in FOOTPRINT_THRESHOLDS:
+        joblib_count = int(np.count_nonzero(valid & (joblib_prob >= t)))
+        csv_count = int(np.count_nonzero(valid & (csv_prob >= t)))
+        print(
+            f"  >= {t * 100:5.1f}%: "
+            f"joblib={joblib_count:,}, csv={csv_count:,}, "
+            f"diff={csv_count - joblib_count:+,}"
+        )
+
+
 def probability_category_label(cat):
     """Create a human-readable legend label for one category definition."""
 
@@ -438,15 +521,17 @@ def print_footprint_diagnostics(raw_prob, calibrated_prob):
         )
 
 
-def plot_raw_vs_calibrated(
+def plot_raw_joblib_csv_comparison(
     ds,
     raw_prob,
-    calibrated_prob,
+    joblib_calibrated_prob,
+    csv_calibrated_prob,
     info,
     model_path,
+    csv_raster_path,
     out_png=None,
 ):
-    """Plot raw and calibrated NBM probabilities side by side."""
+    """Plot raw, joblib-calibrated, and CSV-calibrated probabilities."""
 
     raster_crs = get_nbm_alaska_crs()
 
@@ -454,24 +539,36 @@ def plot_raw_vs_calibrated(
     extent = [left, right, bottom, top]
 
     if USE_CATEGORICAL_PLOTTING:
-        raw_cat, raw_cmap, raw_legend_handles = make_categorical_array(
+        raw_cat, raw_cmap, legend_handles = make_categorical_array(
             raw_prob, CATEGORY_DEFS
         )
-        cal_cat, cal_cmap, cal_legend_handles = make_categorical_array(
-            calibrated_prob, CATEGORY_DEFS
+        joblib_cat, joblib_cmap, _ = make_categorical_array(
+            joblib_calibrated_prob, CATEGORY_DEFS
+        )
+        csv_cat, csv_cmap, _ = make_categorical_array(
+            csv_calibrated_prob, CATEGORY_DEFS
         )
 
         raw_plot = np.ma.masked_invalid(raw_cat)
-        cal_plot = np.ma.masked_invalid(cal_cat)
+        joblib_plot = np.ma.masked_invalid(joblib_cat)
+        csv_plot = np.ma.masked_invalid(csv_cat)
+
     else:
         raw_plot = np.ma.masked_where(
             (~np.isfinite(raw_prob)) | (raw_prob <= PLOT_MIN_PROB),
             raw_prob,
         )
 
-        cal_plot = np.ma.masked_where(
-            (~np.isfinite(calibrated_prob)) | (calibrated_prob <= PLOT_MIN_PROB),
-            calibrated_prob,
+        joblib_plot = np.ma.masked_where(
+            (~np.isfinite(joblib_calibrated_prob)) |
+            (joblib_calibrated_prob <= PLOT_MIN_PROB),
+            joblib_calibrated_prob,
+        )
+
+        csv_plot = np.ma.masked_where(
+            (~np.isfinite(csv_calibrated_prob)) |
+            (csv_calibrated_prob <= PLOT_MIN_PROB),
+            csv_calibrated_prob,
         )
 
         cmap = ListedColormap(PROB_COLORS)
@@ -485,8 +582,8 @@ def plot_raw_vs_calibrated(
 
     fig, axes = plt.subplots(
         1,
-        2,
-        figsize=(16, 8),
+        3,
+        figsize=(22, 8),
         subplot_kw={"projection": raster_crs},
         constrained_layout=True,
     )
@@ -508,94 +605,80 @@ def plot_raw_vs_calibrated(
             linestyle="--",
         )
 
-    # Raw panel
-    ax = axes[0]
-    add_background(ax)
+    panels = [
+        {
+            "ax": axes[0],
+            "plot": raw_plot,
+            "prob": raw_prob,
+            "title": "Raw NBM",
+            "cmap": raw_cmap if USE_CATEGORICAL_PLOTTING else cmap,
+        },
+        {
+            "ax": axes[1],
+            "plot": joblib_plot,
+            "prob": joblib_calibrated_prob,
+            "title": "Joblib-calibrated",
+            "cmap": joblib_cmap if USE_CATEGORICAL_PLOTTING else cmap,
+        },
+        {
+            "ax": axes[2],
+            "plot": csv_plot,
+            "prob": csv_calibrated_prob,
+            "title": "CSV/raster-calibrated",
+            "cmap": csv_cmap if USE_CATEGORICAL_PLOTTING else cmap,
+        },
+    ]
 
-    if USE_CATEGORICAL_PLOTTING:
-        im0 = ax.imshow(
-            raw_plot,
-            origin="upper",
-            extent=extent,
-            transform=raster_crs,
-            cmap=raw_cmap,
-            vmin=1,
-            vmax=len(CATEGORY_DEFS),
-            alpha=0.90,
-            zorder=2,
-        )
-    else:
-        im0 = ax.imshow(
-            raw_plot,
-            origin="upper",
-            extent=extent,
-            transform=raster_crs,
-            cmap=cmap,
-            norm=norm,
-            alpha=0.90,
-            zorder=2,
-        )
+    last_im = None
 
-    raw_title_label = (
-        "Raw NBM Thunder Probability Categories"
-        if USE_CATEGORICAL_PLOTTING
-        else "Raw NBM Thunder Probability"
-    )
-    ax.set_title(
-        f"{raw_title_label}\n"
-        f"Max: {np.nanmax(raw_prob):.2f}, Mean: {np.nanmean(raw_prob):.4f}"
-    )
+    for panel in panels:
+        ax = panel["ax"]
+        add_background(ax)
 
-    # Calibrated panel
-    ax = axes[1]
-    add_background(ax)
+        if USE_CATEGORICAL_PLOTTING:
+            im = ax.imshow(
+                panel["plot"],
+                origin="upper",
+                extent=extent,
+                transform=raster_crs,
+                cmap=panel["cmap"],
+                vmin=1,
+                vmax=len(CATEGORY_DEFS),
+                alpha=0.90,
+                zorder=2,
+            )
 
-    if USE_CATEGORICAL_PLOTTING:
-        im1 = ax.imshow(
-            cal_plot,
-            origin="upper",
-            extent=extent,
-            transform=raster_crs,
-            cmap=cal_cmap,
-            vmin=1,
-            vmax=len(CATEGORY_DEFS),
-            alpha=0.90,
-            zorder=2,
-        )
-    else:
-        im1 = ax.imshow(
-            cal_plot,
-            origin="upper",
-            extent=extent,
-            transform=raster_crs,
-            cmap=cmap,
-            norm=norm,
-            alpha=0.90,
-            zorder=2,
-        )
-
-    cal_title_label = (
-        "Calibrated NBM Thunder Probability Categories"
-        if USE_CATEGORICAL_PLOTTING
-        else "Calibrated NBM Thunder Probability"
-    )
-    ax.set_title(
-        f"{cal_title_label}\n"
-        f"Max: {np.nanmax(calibrated_prob):.2f}, Mean: {np.nanmean(calibrated_prob):.4f}"
-    )
-
-    if USE_CATEGORICAL_PLOTTING:
-        for ax in axes:
             ax.legend(
-                handles=cal_legend_handles,
+                handles=legend_handles,
                 loc="lower left",
                 frameon=True,
                 framealpha=0.92,
                 title="Probability category",
             )
-    else:
+
+        else:
+            im = ax.imshow(
+                panel["plot"],
+                origin="upper",
+                extent=extent,
+                transform=raster_crs,
+                cmap=panel["cmap"],
+                norm=norm,
+                alpha=0.90,
+                zorder=2,
+            )
+
+        last_im = im
+
+        ax.set_title(
+            f"{panel['title']}\n"
+            f"Max: {np.nanmax(panel['prob']):.2f}, "
+            f"Mean: {np.nanmean(panel['prob']):.4f}"
+        )
+
+    if not USE_CATEGORICAL_PLOTTING:
         cbar = fig.colorbar(
-            im1,
+            last_im,
             ax=axes,
             orientation="horizontal",
             fraction=0.046,
@@ -607,14 +690,16 @@ def plot_raw_vs_calibrated(
 
         cbar.set_label("Thunder probability")
         cbar.ax.set_xticklabels(PROB_LEVEL_LABELS)
+        cbar.ax.tick_params(labelsize=8)
 
     fig.suptitle(
-        f"Raw vs {DATASET_NAME} Isotonic-Calibrated NBM Thunder Probability\n"
+        f"Raw vs Joblib vs CSV-Calibrated NBM Thunder Probability\n"
         f"Init: {info['init_dt']:%Y-%m-%d %HZ}, "
         f"F{info['forecast_hour']:03d}, "
         f"Valid: {info['valid_dt']:%Y-%m-%d %HZ}, "
         f"{info['interval_hour']:02d}h {info['period'].title()}\n"
-        f"Model: {model_path.name}",
+        f"Joblib model: {model_path.name}\n"
+        f"CSV raster: {csv_raster_path.name}",
         fontsize=12,
     )
 
@@ -665,6 +750,17 @@ def main():
         raw_prob = np.where(np.isfinite(raw_prob), np.clip(raw_prob, 0.0, 1.0), np.nan)
 
         calibrated_prob = apply_calibration(raw_prob, model)
+        csv_calibrated_prob = read_external_calibrated_raster(
+            CSV_CALIBRATED_FILE,
+            expected_shape=raw_prob.shape,
+        )
+
+        if PRINT_CSV_COMPARISON_DIAGNOSTICS:
+            print_csv_comparison_diagnostics(
+                raw_prob=raw_prob,
+                joblib_prob=calibrated_prob,
+                csv_prob=csv_calibrated_prob,
+            )
 
         if PRINT_FOOTPRINT_DIAGNOSTICS:
             print_footprint_diagnostics(raw_prob, calibrated_prob)
@@ -691,19 +787,20 @@ def main():
             write_calibrated_raster(ds, calibrated_prob, out_tif)
 
         if SAVE_PNG:
-            out_png = OUT_DIR / f"{base_name}_raw_vs_calibrated.png"
+            out_png = out_png = OUT_DIR / f"{base_name}_raw_vs_joblib_vs_csv.png"
         else:
             out_png = None
 
-        plot_raw_vs_calibrated(
+        plot_raw_joblib_csv_comparison(
             ds=ds,
             raw_prob=raw_prob,
-            calibrated_prob=calibrated_prob,
+            joblib_calibrated_prob=calibrated_prob,
+            csv_calibrated_prob=csv_calibrated_prob,
             info=info,
             model_path=model_path,
+            csv_raster_path=CSV_CALIBRATED_FILE,
             out_png=out_png,
         )
-
 
 if __name__ == "__main__":
     main()
